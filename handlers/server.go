@@ -52,6 +52,31 @@ type ReplaceServerHandlerImpl struct {
 	ReloadAgent haproxy.IReloadAgent
 }
 
+// enableServerCheckWhenOtherCheckOptionsSet sets server.Check="enabled" IFF:
+//   * server is not nil
+//   * server.Check is empty
+//   * and one of the other server.Check variants is non-empty/enabled
+//
+// Please see the following links for more information:
+//   * https://cbonte.github.io/haproxy-dconv/2.3/configuration.html#5.2-check
+//   * https://www.haproxy.com/documentation/dataplaneapi/latest/#operation/createServer
+func enableServerCheckWhenOtherCheckOptionsSet(server *models.Server) {
+	if server == nil {
+		return
+	}
+	if server.Check != "" {
+		return
+	}
+	const enabled = "enabled"
+	if server.CheckSni != "" ||
+		server.CheckSsl == enabled ||
+		server.CheckAlpn != "" ||
+		server.CheckProto != "" ||
+		server.CheckViaSocks4 == enabled {
+		server.Check = enabled
+	}
+}
+
 //Handle executing the request and returning a response
 func (h *CreateServerHandlerImpl) Handle(params server.CreateServerParams, principal interface{}) middleware.Responder {
 	t := ""
@@ -71,6 +96,10 @@ func (h *CreateServerHandlerImpl) Handle(params server.CreateServerParams, princ
 			Code:    &c,
 		}
 		return server.NewCreateServerDefault(int(*e.Code)).WithPayload(e)
+	}
+
+	if params.Data != nil {
+		enableServerCheckWhenOtherCheckOptionsSet(params.Data)
 	}
 
 	err := h.Client.Configuration.CreateServer(params.Backend, params.Data, t, v)
@@ -174,6 +203,10 @@ func (h *ReplaceServerHandlerImpl) Handle(params server.ReplaceServerParams, pri
 	}
 	if params.Version != nil {
 		v = *params.Version
+	}
+
+	if params.Data != nil {
+		enableServerCheckWhenOtherCheckOptionsSet(params.Data)
 	}
 
 	if t != "" && *params.ForceReload {
